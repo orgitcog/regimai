@@ -21,6 +21,27 @@ from typing import Dict, List, Tuple, Optional, Any
 import json
 
 
+def _cosine_similarity(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
+    """
+    Compute cosine similarity between two vectors.
+    
+    Args:
+        vec_a: First vector
+        vec_b: Second vector
+        
+    Returns:
+        Cosine similarity value between -1 and 1
+    """
+    norm_a = np.linalg.norm(vec_a)
+    norm_b = np.linalg.norm(vec_b)
+    
+    # Use epsilon comparison for zero norms
+    if norm_a < 1e-10 or norm_b < 1e-10:
+        return 0.0
+        
+    return float(np.dot(vec_a, vec_b) / (norm_a * norm_b))
+
+
 class SkinScale:
     """Represents a specific scale in the multi-scale skin model."""
     
@@ -80,10 +101,10 @@ class TensorEmbedding:
         
         Args:
             component_id: The component to update
-            gradient: Gradient vector for the update
+            gradient: Gradient vector for the update (already scaled by learning rate)
         """
         if 0 <= component_id < self.num_components:
-            self.embeddings[component_id] -= self.learning_rate * gradient
+            self.embeddings[component_id] += gradient
             
     def set_metadata(self, component_id: int, metadata: Dict[str, Any]):
         """Set metadata for a specific component."""
@@ -98,13 +119,7 @@ class TensorEmbedding:
         emb_a = self.embeddings[component_a]
         emb_b = self.embeddings[component_b]
         
-        norm_a = np.linalg.norm(emb_a)
-        norm_b = np.linalg.norm(emb_b)
-        
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-            
-        return float(np.dot(emb_a, emb_b) / (norm_a * norm_b))
+        return _cosine_similarity(emb_a, emb_b)
 
 
 class NeuralFabric:
@@ -257,14 +272,8 @@ class NeuralFabric:
         # Compute similarity with all components at this scale
         for comp_id in range(scale_emb.num_components):
             comp_emb = scale_emb.embeddings[comp_id]
-            
-            # Cosine similarity
-            norm_query = np.linalg.norm(query_embedding)
-            norm_comp = np.linalg.norm(comp_emb)
-            
-            if norm_query > 0 and norm_comp > 0:
-                sim = float(np.dot(query_embedding, comp_emb) / 
-                          (norm_query * norm_comp))
+            sim = _cosine_similarity(query_embedding, comp_emb)
+            if sim != 0.0:  # Only include non-zero similarities
                 similarities.append((comp_id, sim))
         
         # Sort by similarity and return top k
@@ -299,14 +308,10 @@ class NeuralFabric:
         for comp_id in range(target_scale_emb.num_components):
             comp_emb = target_scale_emb.embeddings[comp_id]
             
-            # Compute activation as scaled dot product
-            norm_target = np.linalg.norm(target_emb)
-            norm_comp = np.linalg.norm(comp_emb)
-            
-            if norm_target > 0 and norm_comp > 0:
-                activation = signal_strength * np.dot(target_emb, comp_emb) / \
-                           (norm_target * norm_comp)
-                activations[comp_id] = float(activation)
+            # Compute activation as scaled similarity
+            similarity = _cosine_similarity(target_emb, comp_emb)
+            activation = signal_strength * similarity
+            activations[comp_id] = float(activation)
         
         return activations
     
@@ -327,11 +332,11 @@ class NeuralFabric:
         scale_emb = self.scale_embeddings[scale]
         current_emb = scale_emb.get_embedding(component_id)
         
-        # Compute gradient (simple: direction towards observation)
+        # Compute gradient (direction towards observation)
         gradient = observation - current_emb
         
-        # Update embedding
-        scale_emb.update_embedding(component_id, -learning_rate * gradient)
+        # Update embedding (move towards observation)
+        scale_emb.update_embedding(component_id, learning_rate * gradient)
     
     def save_fabric(self, filepath: str):
         """Save the neural fabric to disk."""
@@ -377,6 +382,9 @@ class NeuralFabric:
         
         # Load transforms
         for key_str, transform_list in fabric_data['cross_scale_transforms'].items():
+            # Validate key format
+            if '->' not in key_str or key_str.count('->') != 1:
+                raise ValueError(f"Invalid transform key format: {key_str}. Expected 'from_scale->to_scale'")
             from_scale, to_scale = key_str.split('->')
             self.cross_scale_transforms[(from_scale, to_scale)] = \
                 np.array(transform_list)

@@ -17,9 +17,9 @@ from typing import Dict, List, Any, Optional, Tuple
 import numpy as np
 
 try:
-    from .neural_fabric import NeuralFabric, SkinScale
+    from .neural_fabric import NeuralFabric, SkinScale, _cosine_similarity
 except ImportError:
-    from neural_fabric import NeuralFabric, SkinScale
+    from neural_fabric import NeuralFabric, SkinScale, _cosine_similarity
 
 
 class FabricIntegrationLayer:
@@ -197,30 +197,22 @@ class FabricIntegrationLayer:
             return {'truth_value': 0.0, 'confidence': 0.0}
         
         # Compute similarity as proxy for truth value
-        norm_premise = np.linalg.norm(combined_premise)
-        norm_conclusion = np.linalg.norm(conclusion_emb)
-        
-        if norm_premise > 0 and norm_conclusion > 0:
-            truth_value = float(np.dot(combined_premise, conclusion_emb) / 
-                              (norm_premise * norm_conclusion))
-            # Normalize to [0, 1]
-            truth_value = (truth_value + 1) / 2
-        else:
-            truth_value = 0.0
+        truth_value = _cosine_similarity(combined_premise, conclusion_emb)
+        # Normalize to [0, 1]
+        truth_value = (truth_value + 1) / 2
         
         # Confidence based on number of premises and their consistency
         premise_consistency = 0.0
         if len(premise_embeddings) > 1:
+            pair_count = 0
             for i in range(len(premise_embeddings)):
                 for j in range(i + 1, len(premise_embeddings)):
-                    norm_i = np.linalg.norm(premise_embeddings[i])
-                    norm_j = np.linalg.norm(premise_embeddings[j])
-                    if norm_i > 0 and norm_j > 0:
-                        sim = np.dot(premise_embeddings[i], premise_embeddings[j]) / \
-                              (norm_i * norm_j)
-                        premise_consistency += (sim + 1) / 2
+                    sim = _cosine_similarity(premise_embeddings[i], premise_embeddings[j])
+                    premise_consistency += (sim + 1) / 2
+                    pair_count += 1
             
-            premise_consistency /= (len(premise_embeddings) * (len(premise_embeddings) - 1) / 2)
+            if pair_count > 0:
+                premise_consistency /= pair_count
         else:
             premise_consistency = 1.0
         
