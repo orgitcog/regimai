@@ -15,7 +15,11 @@ cognitive components, enabling:
 
 from typing import Dict, List, Any, Optional, Tuple
 import numpy as np
-from .neural_fabric import NeuralFabric, SkinScale
+
+try:
+    from .neural_fabric import NeuralFabric, SkinScale
+except ImportError:
+    from neural_fabric import NeuralFabric, SkinScale
 
 
 class FabricIntegrationLayer:
@@ -406,7 +410,10 @@ def create_integrated_platform(embedding_dimension: int = 128) -> Tuple[NeuralFa
     Returns:
         Tuple of (NeuralFabric, FabricIntegrationLayer)
     """
-    from .neural_fabric import create_default_fabric
+    try:
+        from .neural_fabric import create_default_fabric
+    except ImportError:
+        from neural_fabric import create_default_fabric
     
     fabric = create_default_fabric(embedding_dimension)
     integration = FabricIntegrationLayer(fabric)
